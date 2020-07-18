@@ -249,6 +249,51 @@ var marshalTests = []struct {
 		"a: null\n",
 	},
 
+	// Order flag
+	{
+		&struct {
+			A int `yaml:"a"`
+			B int `yaml:"b,order=1"`
+			C int `yaml:"c,order=2"`
+			D int `yaml:"d,order=3"`
+			E int `yaml:"e"`
+		}{
+			A: 3,
+			B: 0,
+			C: 1,
+			D: 2,
+			E: 4,
+		}, "b: 0\nc: 1\nd: 2\na: 3\ne: 4\n",
+	},
+	{
+		&struct {
+			A int `yaml:"a,order=0"`
+			B int `yaml:"b,order=1"`
+			C int `yaml:"c,order=3"`
+			D int `yaml:"d,order=2"`
+			E int `yaml:"e"`
+		}{
+			A: 0,
+			B: 1,
+			C: 2,
+			D: 3,
+			E: 4,
+		}, "a: 0\nb: 1\nd: 3\nc: 2\ne: 4\n",
+	},
+	{
+		&struct {
+			A *int `yaml:"a,omitempty,order=1"`
+			B int  `yaml:"b,order=2"`
+			C int  `yaml:"c,order=3"`
+			D int  `yaml:"d,order=4"`
+			E int  `yaml:"e,order=0"`
+		}{
+			B: 2,
+			C: 3,
+			D: 4,
+			E: 0,
+		}, "e: 0\nb: 2\nc: 3\nd: 4\n",
+	},
 	// Flow flag
 	{
 		&struct {

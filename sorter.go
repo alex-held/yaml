@@ -132,3 +132,9 @@ func numLess(a, b reflect.Value) bool {
 	}
 	panic("not a number")
 }
+
+type fieldInfoSlice []fieldInfo
+
+func (l fieldInfoSlice) Len() int           { return len(l) }
+func (l fieldInfoSlice) Swap(i, j int)      { l[i], l[j] = l[j], l[i] }
+func (l fieldInfoSlice) Less(i, j int) bool { return l[i].Order < l[j].Order }

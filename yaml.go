@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -363,7 +365,7 @@ const (
 //             Address yaml.Node
 //     }
 //     err := yaml.Unmarshal(data, &person)
-// 
+//
 // Or by itself:
 //
 //     var person Node
@@ -373,7 +375,7 @@ type Node struct {
 	// Kind defines whether the node is a document, a mapping, a sequence,
 	// a scalar value, or an alias to another node. The specific data type of
 	// scalar nodes may be obtained via the ShortTag and LongTag methods.
-	Kind  Kind
+	Kind Kind
 
 	// Style allows customizing the apperance of the node in the tree.
 	Style Style
@@ -420,7 +422,6 @@ func (n *Node) IsZero() bool {
 	return n.Kind == 0 && n.Style == 0 && n.Tag == "" && n.Value == "" && n.Anchor == "" && n.Alias == nil && n.Content == nil &&
 		n.HeadComment == "" && n.LineComment == "" && n.FootComment == "" && n.Line == 0 && n.Column == 0
 }
-
 
 // LongTag returns the long form of the tag that indicates the data type for
 // the node. If the Tag field isn't explicitly defined, one will be computed
@@ -508,6 +509,7 @@ type fieldInfo struct {
 
 	// Inline holds the field index if the field is part of an inlined struct.
 	Inline []int
+	Order  int
 }
 
 var structMap = make(map[reflect.Type]*structInfo)
@@ -526,11 +528,12 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 	if found {
 		return sinfo, nil
 	}
-
 	n := st.NumField()
 	fieldsMap := make(map[string]fieldInfo)
-	fieldsList := make([]fieldInfo, 0, n)
+	orderedFieldsList := make(fieldInfoSlice, 0, n)
+	unorderedFieldsList := make(fieldInfoSlice, 0, n)
 	inlineMap := -1
+	maxOrder := -1
 	inlineUnmarshalers := [][]int(nil)
 	for i := 0; i != n; i++ {
 		field := st.Field(i)
@@ -538,7 +541,7 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 			continue // Private field
 		}
 
-		info := fieldInfo{Num: i}
+		info := fieldInfo{Num: i, Order: -1}
 
 		tag := field.Tag.Get("yaml")
 		if tag == "" && strings.Index(string(field.Tag), ":") < 0 {
@@ -552,13 +555,28 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 		fields := strings.Split(tag, ",")
 		if len(fields) > 1 {
 			for _, flag := range fields[1:] {
-				switch flag {
-				case "omitempty":
+				switch {
+				case flag == "omitempty":
 					info.OmitEmpty = true
-				case "flow":
+				case flag == "flow":
 					info.Flow = true
-				case "inline":
+				case flag == "inline":
 					inline = true
+				case strings.HasPrefix(flag, "order="):
+					o, err := strconv.Atoi(strings.TrimPrefix(flag, "order="))
+					if err != nil {
+						return nil, errors.New("Option ,order needs a valid integer value. Usage `,order=1`")
+					}
+					if o < 0 {
+						return nil, errors.New(fmt.Sprintf("Option ,order with value '%d' must me greater than 0", o))
+					}
+					if o >= n {
+						return nil, errors.New(fmt.Sprintf("Option ,order with value '%d' must me smaller than '%d' (the number of struct fields) for type %s", o, n, st.Name()))
+					}
+					if maxOrder <= o {
+						maxOrder = o
+					}
+					info.Order = o
 				default:
 					return nil, errors.New(fmt.Sprintf("unsupported flag %q in tag %q of type %s", flag, tag, st))
 				}
@@ -604,9 +622,13 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 						} else {
 							finfo.Inline = append([]int{i}, finfo.Inline...)
 						}
-						finfo.Id = len(fieldsList)
+						finfo.Id = len(orderedFieldsList) + len(unorderedFieldsList)
 						fieldsMap[finfo.Key] = finfo
-						fieldsList = append(fieldsList, finfo)
+						if info.Order != -1 {
+							orderedFieldsList = append(orderedFieldsList, finfo)
+						} else {
+							unorderedFieldsList = append(unorderedFieldsList, finfo)
+						}
 					}
 				}
 			default:
@@ -626,10 +648,28 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 			return nil, errors.New(msg)
 		}
 
-		info.Id = len(fieldsList)
-		fieldsList = append(fieldsList, info)
+		info.Id = len(orderedFieldsList) + len(unorderedFieldsList)
+		if info.Order != -1 {
+			orderedFieldsList = append(orderedFieldsList, info)
+		} else {
+			unorderedFieldsList = append(unorderedFieldsList, info)
+		}
 		fieldsMap[info.Key] = info
 	}
+
+	sort.Sort(orderedFieldsList)
+	for i, info := range orderedFieldsList {
+		info.Order = i
+		orderedFieldsList[i] = info
+	}
+
+	for i, info := range unorderedFieldsList {
+		order := maxOrder + i + 1
+		info.Order = order
+		unorderedFieldsList[i] = info
+	}
+	fieldsList := append(orderedFieldsList, unorderedFieldsList...)
+	sort.Sort(fieldsList)
 
 	sinfo = &structInfo{
 		FieldsMap:          fieldsMap,
