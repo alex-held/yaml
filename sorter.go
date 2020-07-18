@@ -52,7 +52,7 @@ func (l keyList) Less(i, j int) bool {
 		var ai, bi int
 		var an, bn int64
 		if ar[i] == '0' || br[i] == '0' {
-			for j := i-1; j >= 0 && unicode.IsDigit(ar[j]); j-- {
+			for j := i - 1; j >= 0 && unicode.IsDigit(ar[j]); j-- {
 				if ar[j] != '0' {
 					an = 1
 					bn = 1
@@ -110,4 +110,12 @@ func numLess(a, b reflect.Value) bool {
 		return !a.Bool() && b.Bool()
 	}
 	panic("not a number")
+}
+
+type fieldInfoSlice []fieldInfo
+
+func (l fieldInfoSlice) Len() int      { return len(l) }
+func (l fieldInfoSlice) Swap(i, j int) { l[i], l[j] = l[j], l[i] }
+func (l fieldInfoSlice) Less(i, j int) bool {
+	return l[i].Order < l[j].Order
 }

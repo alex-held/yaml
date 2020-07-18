@@ -1,17 +1,18 @@
 package yaml_test
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"math"
+	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"net"
-	"os"
-
 	. "gopkg.in/check.v1"
+
 	"gopkg.in/yaml.v2"
 )
 
@@ -551,6 +552,37 @@ func (ft *failingMarshaler) MarshalYAML() (interface{}, error) {
 func (s *S) TestMarshalerError(c *C) {
 	_, err := yaml.Marshal(&failingMarshaler{})
 	c.Assert(err, Equals, failingErr)
+}
+
+func (s *S) TestOrder(c *C) {
+
+	type orderTagStruct struct {
+		Version  string `yaml:"version,order=1"`
+		Kind     string `yaml:"kind,order=2"`
+		Spec     string `yaml:"spec,order=4"`
+		Metadata string `yaml:"metadata,order=3"`
+		Name     string `yaml:"name"`
+	}
+
+	data := orderTagStruct{
+		Version:  "version-value",
+		Kind:     "kind-value",
+		Spec:     "spec-value",
+		Metadata: "metadata-value",
+		Name:     "name-value",
+	}
+
+	bytes, _ := yaml.Marshal(data)
+	scanner := bufio.NewScanner(strings.NewReader(string(bytes)))
+	var lines []string
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	c.Assert(lines[0], Equals, "version: version-value")
+	c.Assert(lines[1], Equals, "kind: kind-value")
+	c.Assert(lines[2], Equals, "metadata: metadata-value")
+	c.Assert(lines[3], Equals, "spec: spec-value")
+	c.Assert(lines[4], Equals, "name: name-value")
 }
 
 func (s *S) TestSortedOutput(c *C) {

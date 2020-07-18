@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -302,6 +304,7 @@ type fieldInfo struct {
 
 	// Inline holds the field index if the field is part of an inlined struct.
 	Inline []int
+	Order  int
 }
 
 var structMap = make(map[reflect.Type]*structInfo)
@@ -317,8 +320,11 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 
 	n := st.NumField()
 	fieldsMap := make(map[string]fieldInfo)
-	fieldsList := make([]fieldInfo, 0, n)
+	fieldsList := make(fieldInfoSlice, 0, n)
+	unorderedFieldsList := make([]fieldInfo, 0, n)
 	inlineMap := -1
+	maxOrder := 0
+	const unorderedIota = iota
 	for i := 0; i != n; i++ {
 		field := st.Field(i)
 		if field.PkgPath != "" && !field.Anonymous {
@@ -339,13 +345,22 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 		fields := strings.Split(tag, ",")
 		if len(fields) > 1 {
 			for _, flag := range fields[1:] {
-				switch flag {
-				case "omitempty":
+				switch {
+				case flag == "omitempty":
 					info.OmitEmpty = true
-				case "flow":
+				case flag == "flow":
 					info.Flow = true
-				case "inline":
+				case flag == "inline":
 					inline = true
+				case strings.HasPrefix(flag, "order="):
+					o, err := strconv.Atoi(strings.TrimPrefix(flag, "order="))
+					if err != nil {
+						return nil, errors.New("Option ,order needs a valid integer value. Usage `,order=1`")
+					}
+					if maxOrder < o {
+						maxOrder = o
+					}
+					info.Order = o
 				default:
 					return nil, errors.New(fmt.Sprintf("Unsupported flag %q in tag %q of type %s", flag, tag, st))
 				}
@@ -401,9 +416,19 @@ func getStructInfo(st reflect.Type) (*structInfo, error) {
 		}
 
 		info.Id = len(fieldsList)
-		fieldsList = append(fieldsList, info)
+		if info.Order == 0 {
+			unorderedFieldsList = append(unorderedFieldsList, info)
+		} else {
+			fieldsList = append(fieldsList, info)
+		}
 		fieldsMap[info.Key] = info
 	}
+
+	for _, info := range unorderedFieldsList {
+		info.Order = maxOrder + unorderedIota + 1
+		fieldsList = append(fieldsList, info)
+	}
+	sort.Sort(fieldsList)
 
 	sinfo = &structInfo{
 		FieldsMap:  fieldsMap,
